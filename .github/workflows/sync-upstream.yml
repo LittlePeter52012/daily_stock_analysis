@@ -1,0 +1,54 @@
+name: Sync Fork With Upstream
+
+on:
+  # 每天北京时间 05:45 先同步上游，尽量让 06:17 的每日分析使用最新代码
+  schedule:
+    - cron: '45 21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sync-fork-with-upstream
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge upstream main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          UPSTREAM_URL="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.parent.clone_url // empty')"
+          if [ -z "$UPSTREAM_URL" ]; then
+            echo "This repository has no upstream parent; skip sync."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch origin main
+          git fetch upstream main
+
+          BEFORE="$(git rev-parse HEAD)"
+          git merge --no-edit upstream/main
+          AFTER="$(git rev-parse HEAD)"
+
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "Fork is already up to date with upstream/main."
+            exit 0
+          fi
+
+          git push origin HEAD:main
