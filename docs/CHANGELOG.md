@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [改进] 放宽 LiteLLM 依赖约束，保留 `>=1.80.10` 最低版本并显式排除 PyPI 事故版本 `1.82.7` / `1.82.8`，允许安装后续 1.x 修复版本。
 - [改进] 调整每日分析 GitHub Actions 定时为北京时间 06:17，默认合并个股与大盘复盘通知，并新增 fork 自动同步上游工作流。
+- [改进] 补齐通知渠道 P0 基线、Actions 映射与 `--check-notify` 只读诊断，完善 AstrBot 配置入口和通知回归快照。
+- [chore] 清理仓库根目录：移除误入库的 `.codex`、`review.md` 跟踪记录，将 smoke 测试入口迁移到 `scripts/`、环境检查脚本迁移为 `scripts/check_env.py`，并将 LiteLLM YAML 示例迁移到 `docs/examples/`。
 
 ## [3.15.0] - 2026-05-05
 
