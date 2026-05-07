@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+# Scheduled runs use the default GITHUB_TOKEN. GitHub refuses pushes that modify
+# .github/workflows/* unless the token has the workflow scope, so keep this
+# fork's workflow files pinned and sync ordinary code/docs changes automatically.
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -44,6 +47,20 @@ jobs:
 
           BEFORE="$(git rev-parse HEAD)"
           git merge --no-edit upstream/main
+
+          # Keep workflow files unchanged during automated sync. Otherwise the
+          # push can be rejected because GITHUB_TOKEN cannot update workflows.
+          if ! git diff --quiet "$BEFORE" -- .github/workflows; then
+            if git diff --quiet "$BEFORE" -- . ':(exclude).github/workflows'; then
+              echo "Only workflow files changed upstream; skip sync."
+              git reset --hard "$BEFORE"
+              exit 0
+            fi
+            git checkout "$BEFORE" -- .github/workflows
+            git add .github/workflows
+            git commit --no-edit --amend
+          fi
+
           AFTER="$(git rev-parse HEAD)"
 
           if [ "$BEFORE" = "$AFTER" ]; then
