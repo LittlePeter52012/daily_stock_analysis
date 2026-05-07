@@ -1619,9 +1619,20 @@ class DataFetcherManager:
         logger.info(f"[股票名称] 批量获取完成，成功 {len(result)}/{len(stock_codes)}")
         return result
 
-    def get_main_indices(self, region: str = "cn") -> List[Dict[str, Any]]:
-        """获取主要指数实时行情（自动切换数据源）"""
-        if region == "cn":
+    def get_main_indices(self, region: str = "cn", prefer_completed_session: bool = False) -> List[Dict[str, Any]]:
+        """获取主要指数行情（自动切换数据源）。
+
+        prefer_completed_session=True 用于晨间大盘复盘：跳过 TickFlow 等实时快照，
+        优先让 Tushare/Yfinance 这类日线接口返回上一完整交易日数据。
+        """
+        fetchers = self._get_fetchers_snapshot()
+        if prefer_completed_session:
+            completed_order = {"TushareFetcher": 0, "YfinanceFetcher": 1}
+            fetchers = sorted(
+                fetchers,
+                key=lambda f: (completed_order.get(f.name, 50), getattr(f, "priority", 99)),
+            )
+        if region == "cn" and not prefer_completed_session:
             tickflow_fetcher = self._get_tickflow_fetcher()
             if tickflow_fetcher is not None:
                 try:
@@ -1632,7 +1643,7 @@ class DataFetcherManager:
                 except Exception as e:
                     logger.warning(f"[TickFlowFetcher] 获取指数行情失败: {e}")
 
-        for fetcher in self._fetchers:
+        for fetcher in fetchers:
             try:
                 data = fetcher.get_main_indices(region=region)
                 if data:
@@ -1643,19 +1654,31 @@ class DataFetcherManager:
                 continue
         return []
 
-    def get_market_stats(self) -> Dict[str, Any]:
-        """获取市场涨跌统计（自动切换数据源）"""
-        tickflow_fetcher = self._get_tickflow_fetcher()
-        if tickflow_fetcher is not None:
-            try:
-                data = tickflow_fetcher.get_market_stats()
-                if data:
-                    logger.info("[TickFlowFetcher] 获取市场统计成功")
-                    return data
-            except Exception as e:
-                logger.warning(f"[TickFlowFetcher] 获取市场统计失败: {e}")
+    def get_market_stats(self, prefer_completed_session: bool = False) -> Dict[str, Any]:
+        """获取市场涨跌统计（自动切换数据源）。
 
-        for fetcher in self._fetchers:
+        prefer_completed_session=True 用于晨间大盘复盘：跳过 TickFlow 实时快照，
+        优先使用可回看上一完整交易日的 Tushare daily 口径。
+        """
+        fetchers = self._get_fetchers_snapshot()
+        if prefer_completed_session:
+            completed_order = {"TushareFetcher": 0, "YfinanceFetcher": 1}
+            fetchers = sorted(
+                fetchers,
+                key=lambda f: (completed_order.get(f.name, 50), getattr(f, "priority", 99)),
+            )
+        else:
+            tickflow_fetcher = self._get_tickflow_fetcher()
+            if tickflow_fetcher is not None:
+                try:
+                    data = tickflow_fetcher.get_market_stats()
+                    if data:
+                        logger.info("[TickFlowFetcher] 获取市场统计成功")
+                        return data
+                except Exception as e:
+                    logger.warning(f"[TickFlowFetcher] 获取市场统计失败: {e}")
+
+        for fetcher in fetchers:
             try:
                 data = fetcher.get_market_stats()
                 if data:

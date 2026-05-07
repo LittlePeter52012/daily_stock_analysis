@@ -620,6 +620,60 @@ class TestMarketAnalyzerBypassFix:
         assert isinstance(result, str) and len(result) > 0
         ma.analyzer.generate_text.assert_called_once()
 
+    def test_market_overview_prefers_completed_session_for_morning_review(self):
+        """Morning market review should use the last completed session, not current zero realtime data."""
+        ma = self._make_market_analyzer_with_mock_generate_text("复盘结果")
+
+        class CompletedSessionDataManager:
+            def __init__(self):
+                self.index_flag = None
+                self.stats_flag = None
+
+            def get_main_indices(self, region="cn", prefer_completed_session=False):
+                self.index_flag = prefer_completed_session
+                return [
+                    {
+                        "code": "000001",
+                        "name": "上证指数",
+                        "current": 3400.0,
+                        "change": 12.0,
+                        "change_pct": 0.35,
+                        "open": 3380.0,
+                        "high": 3410.0,
+                        "low": 3375.0,
+                        "prev_close": 3388.0,
+                        "volume": 1000.0,
+                        "amount": 120000000000.0,
+                        "amplitude": 1.03,
+                        "trade_date": "2026-05-06",
+                    }
+                ]
+
+            def get_market_stats(self, prefer_completed_session=False):
+                self.stats_flag = prefer_completed_session
+                return {
+                    "up_count": 3200,
+                    "down_count": 1800,
+                    "flat_count": 100,
+                    "limit_up_count": 88,
+                    "limit_down_count": 5,
+                    "total_amount": 14567.0,
+                }
+
+            def get_sector_rankings(self, _n=5):
+                return [], []
+
+        manager = CompletedSessionDataManager()
+        ma.data_manager = manager
+
+        overview = ma.get_market_overview()
+
+        assert overview.date == "2026-05-06"
+        assert overview.indices[0].trade_date == "2026-05-06"
+        assert overview.up_count == 3200
+        assert manager.index_flag is True
+        assert manager.stats_flag is True
+
     def test_generate_text_none_falls_back_to_template(self):
         """generate_market_review() falls back to template when generate_text returns None."""
         from src.market_analyzer import MarketOverview, MarketIndex
@@ -728,7 +782,7 @@ class TestMarketAnalyzerBypassFix:
 
         assert "## 2026-03-05 大盘复盘" in result
         assert "### 一、盘面总览" in result
-        assert "今日美股市场整体呈现**小幅下跌**态势" in result
+        assert "复盘日美股市场整体呈现**小幅下跌**态势" in result
         assert "### 1. Market Summary" not in result
         assert "US Market Recap" not in result
 

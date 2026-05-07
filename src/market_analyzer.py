@@ -13,7 +13,7 @@
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 import pandas as pd
@@ -58,6 +58,7 @@ class MarketIndex:
     volume: float = 0.0          # 成交量（手）
     amount: float = 0.0          # 成交额（元）
     amplitude: float = 0.0       # 振幅(%)
+    trade_date: Optional[str] = None  # 交易日期（YYYY-MM-DD），用于早晨推送复盘上一完整交易日
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -72,6 +73,7 @@ class MarketIndex:
             'volume': self.volume,
             'amount': self.amount,
             'amplitude': self.amplitude,
+            'trade_date': self.trade_date,
         }
 
 
@@ -277,22 +279,56 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             }
         return mapping[mood_key]
 
+    @staticmethod
+    def _default_completed_review_date() -> str:
+        """Return the previous calendar day as the default completed-session label."""
+        return (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    @staticmethod
+    def _normalize_trade_date(value: Any) -> Optional[str]:
+        """Normalize provider date values to YYYY-MM-DD."""
+        if value in (None, ""):
+            return None
+        try:
+            ts = pd.to_datetime(value)
+            if pd.isna(ts):
+                return None
+            return ts.strftime('%Y-%m-%d')
+        except Exception:
+            text = str(value).strip()
+            if len(text) == 8 and text.isdigit():
+                return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+            if len(text) >= 10:
+                return text[:10]
+            return None
+
+    @staticmethod
+    def _resolve_completed_review_date(indices: List[MarketIndex]) -> str:
+        """Prefer provider trade dates; fall back to yesterday for providers without date fields."""
+        dates = [idx.trade_date for idx in indices if idx.trade_date]
+        if dates:
+            return max(dates)
+        return MarketAnalyzer._default_completed_review_date()
+
     def get_market_overview(self) -> MarketOverview:
         """
-        获取市场概览数据
+        获取市场概览数据。
+
+        大盘复盘默认面向“已完整收盘的交易日”，避免早晨定时推送时读取
+        当日未开盘/集合竞价前的 0 值实时行情。
         
         Returns:
             MarketOverview: 市场概览数据对象
         """
-        today = datetime.now().strftime('%Y-%m-%d')
-        overview = MarketOverview(date=today)
+        overview = MarketOverview(date=self._default_completed_review_date())
         
-        # 1. 获取主要指数行情（按 region 切换 A 股/美股）
-        overview.indices = self._get_main_indices()
+        # 1. 获取主要指数行情（按 region 切换 A 股/美股），优先取已收盘日数据
+        overview.indices = self._get_main_indices(prefer_completed_session=True)
+        overview.date = self._resolve_completed_review_date(overview.indices)
 
-        # 2. 获取涨跌统计（A 股有，美股无等效数据）
+        # 2. 获取涨跌统计（A 股有，美股无等效数据），大盘复盘优先使用已收盘统计
         if self.profile.has_market_stats:
-            self._get_market_statistics(overview)
+            self._get_market_statistics(overview, prefer_completed_session=True)
 
         # 3. 获取板块涨跌榜（A 股有，美股暂无）
         if self.profile.has_sector_rankings:
@@ -304,15 +340,25 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return overview
 
     
-    def _get_main_indices(self) -> List[MarketIndex]:
-        """获取主要指数实时行情"""
+    def _get_main_indices(self, prefer_completed_session: bool = False) -> List[MarketIndex]:
+        """获取主要指数行情；大盘复盘可要求优先使用已收盘日数据。"""
         indices = []
 
         try:
-            logger.info("[大盘] 获取主要指数实时行情...")
+            if prefer_completed_session:
+                logger.info("[大盘] 获取主要指数已收盘日行情...")
+            else:
+                logger.info("[大盘] 获取主要指数实时行情...")
 
             # 使用 DataFetcherManager 获取指数行情（按 region 切换）
-            data_list = self.data_manager.get_main_indices(region=self.region)
+            try:
+                data_list = self.data_manager.get_main_indices(
+                    region=self.region,
+                    prefer_completed_session=prefer_completed_session,
+                )
+            except TypeError:
+                # 兼容测试桩或旧版 DataFetcherManager。
+                data_list = self.data_manager.get_main_indices(region=self.region)
 
             if data_list:
                 for item in data_list:
@@ -328,7 +374,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                         prev_close=item['prev_close'],
                         volume=item['volume'],
                         amount=item['amount'],
-                        amplitude=item['amplitude']
+                        amplitude=item['amplitude'],
+                        trade_date=self._normalize_trade_date(
+                            item.get('trade_date') or item.get('date') or item.get('tradeDate')
+                        ),
                     )
                     indices.append(index)
 
@@ -342,12 +391,20 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         return indices
 
-    def _get_market_statistics(self, overview: MarketOverview):
+    def _get_market_statistics(self, overview: MarketOverview, prefer_completed_session: bool = False):
         """获取市场涨跌统计"""
         try:
-            logger.info("[大盘] 获取市场涨跌统计...")
+            if prefer_completed_session:
+                logger.info("[大盘] 获取已收盘日市场涨跌统计...")
+            else:
+                logger.info("[大盘] 获取市场涨跌统计...")
 
-            stats = self.data_manager.get_market_stats()
+            try:
+                stats = self.data_manager.get_market_stats(
+                    prefer_completed_session=prefer_completed_session
+                )
+            except TypeError:
+                stats = self.data_manager.get_market_stats()
 
             if stats:
                 overview.up_count = stats.get('up_count', 0)
@@ -919,7 +976,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 ---
 
-# Today's Market Data
+# Completed-Session Market Data
 
 ## Date
 {overview.date}
@@ -983,7 +1040,7 @@ Output the report content directly, no extra commentary.
 
 ---
 
-# 今日市场数据
+# 复盘日市场数据
 
 ## 日期
 {overview.date}
@@ -1008,7 +1065,7 @@ Output the report content directly, no extra commentary.
 
 ## {overview.date} 大盘复盘
 
-> 一句话给出今日市场状态、核心矛盾和明日优先观察方向。
+> 一句话给出复盘日市场状态、核心矛盾和下一交易日优先观察方向。
 
 ### 一、盘面总览
 （2-3句话概括指数、涨跌家数、成交额和情绪温度，明确“强势/偏暖/震荡/偏弱”判断）
@@ -1023,9 +1080,9 @@ Output the report content directly, no extra commentary.
 （解读成交额、涨跌停结构、市场宽度和风险偏好）
 
 ### 五、消息催化
-（结合近三日新闻，提炼真正影响明日交易的催化或扰动）
+（结合近三日新闻，提炼真正影响下一交易日交易的催化或扰动）
 
-### 六、明日交易计划
+### 六、下一交易日计划
 （给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向和一个触发失效条件）
 
 ### 七、风险提示
@@ -1099,7 +1156,7 @@ Output the report content directly, no extra commentary.
             report = f"""## {overview.date} {market_name}
 
 ### 1. Market Summary
-Today's {self._get_market_scope_name(template_language)} showed **{market_mood}**.
+The completed-session {self._get_market_scope_name(template_language)} showed **{market_mood}**.
 
 ### 2. Major Indices
 {indices_text or "- No index data available"}
@@ -1122,7 +1179,7 @@ Market conditions can change quickly. The data above is for reference only and d
         sector_block = self._build_sector_block(overview)
         return f"""## {overview.date} 大盘复盘
 
-> 今日{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。
+> 复盘日{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。
 
 ### 一、盘面总览
 {dashboard_block or "暂无市场宽度数据。"}
@@ -1139,7 +1196,7 @@ Market conditions can change quickly. The data above is for reference only and d
 ### 五、消息催化
 - 暂无可用新闻时，应降低对题材持续性的确定性判断。
 
-### 六、明日交易计划
+### 六、下一交易日计划
 - **结论**：均衡观察。
 - **仓位**：控制在中性区间，等待指数与主线共振。
 - **关注方向**：{top_text or "强于指数的主线板块"}。

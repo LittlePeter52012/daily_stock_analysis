@@ -280,6 +280,7 @@ class YfinanceFetcher(BaseFetcher):
         if hist.empty:
             return None
         today_row = hist.iloc[-1]
+        trade_date = today_row.name.strftime('%Y-%m-%d') if hasattr(today_row.name, 'strftime') else str(today_row.name)[:10]
         prev_row = hist.iloc[-2] if len(hist) > 1 else today_row
         price = float(today_row['Close'])
         prev_close = float(prev_row['Close'])
@@ -302,6 +303,7 @@ class YfinanceFetcher(BaseFetcher):
             'volume': float(today_row['Volume']),
             'amount': 0.0,  # Yahoo Finance 不提供准确成交额
             'amplitude': amplitude,
+            'trade_date': trade_date,
         }
 
     def get_main_indices(self, region: str = "cn") -> Optional[List[Dict[str, Any]]]:

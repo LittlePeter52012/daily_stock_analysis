@@ -65,6 +65,40 @@ class TestTickFlowMarketReviewFallback(unittest.TestCase):
         self.assertEqual(data, [{"code": "000001"}])
         self.assertEqual(fallback.index_calls, 0)
 
+    def test_manager_completed_session_skips_tickflow_and_prefers_daily_fetcher(self):
+        manager = DataFetcherManager.__new__(DataFetcherManager)
+        realtime = _DummyFetcher("EfinanceFetcher", indices=[{"code": "zero"}])
+        daily = _DummyFetcher("TushareFetcher", indices=[{"code": "hist"}])
+        manager._fetchers = [realtime, daily]
+        manager._get_tickflow_fetcher = lambda: self.fail(
+            "TickFlow should be skipped for completed-session market review"
+        )
+
+        data = DataFetcherManager.get_main_indices(
+            manager, region="cn", prefer_completed_session=True
+        )
+
+        self.assertEqual(data, [{"code": "hist"}])
+        self.assertEqual(daily.index_calls, 1)
+        self.assertEqual(realtime.index_calls, 0)
+
+    def test_manager_completed_session_market_stats_skips_tickflow(self):
+        manager = DataFetcherManager.__new__(DataFetcherManager)
+        realtime = _DummyFetcher("EfinanceFetcher", stats={"up_count": 0})
+        daily = _DummyFetcher("TushareFetcher", stats={"up_count": 3200})
+        manager._fetchers = [realtime, daily]
+        manager._get_tickflow_fetcher = lambda: self.fail(
+            "TickFlow should be skipped for completed-session market stats"
+        )
+
+        data = DataFetcherManager.get_market_stats(
+            manager, prefer_completed_session=True
+        )
+
+        self.assertEqual(data["up_count"], 3200)
+        self.assertEqual(daily.stats_calls, 1)
+        self.assertEqual(realtime.stats_calls, 0)
+
     def test_manager_falls_back_when_tickflow_indices_fail(self):
         manager = DataFetcherManager.__new__(DataFetcherManager)
         fallback = _DummyFetcher("AkshareFetcher", indices=[{"code": "fallback"}])
