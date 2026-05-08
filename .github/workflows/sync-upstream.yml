@@ -1,9 +1,10 @@
 name: Sync Fork With Upstream
 
 on:
-  # 每天北京时间 05:45 先同步上游，尽量让 06:17 的每日分析使用最新代码
+  # 每天北京时间 04:00 先同步上游，尽量让 04:50 的每日分析使用最新代码；
+  # workflow 文件保持 fork 本地版本，避免上游覆盖本仓定时与 Secrets/Variables 绑定。
   schedule:
-    - cron: '45 21 * * *'
+    - cron: '0 20 * * *'
   workflow_dispatch:
 
 permissions:

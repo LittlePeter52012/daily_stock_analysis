@@ -1619,11 +1619,53 @@ class DataFetcherManager:
         logger.info(f"[股票名称] 批量获取完成，成功 {len(result)}/{len(stock_codes)}")
         return result
 
+    @staticmethod
+    def _has_valid_main_index_payload(data: Any, region: str = "cn") -> bool:
+        """Validate main-index payload before accepting a fetcher result.
+
+        Some fallback providers may return a non-empty list with missing/NaN
+        prices. Treat that as unusable so the manager can continue to the next
+        source instead of generating a report with absent SSE/CSI300 values.
+        """
+        if not data or not isinstance(data, list):
+            return False
+
+        required_codes = {"sh000001", "000001", "sh000300", "000300"}
+        seen_required = set()
+        valid_count = 0
+
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("code") or "").strip().lower()
+            current = item.get("current")
+            change_pct = item.get("change_pct")
+            try:
+                current_float = float(current)
+                change_pct_float = float(change_pct)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(current_float) or not np.isfinite(change_pct_float):
+                continue
+            if current_float <= 0:
+                continue
+            valid_count += 1
+            if code in required_codes or code.endswith("000001") or code.endswith("000300"):
+                seen_required.add(code[-6:])
+
+        if valid_count == 0:
+            return False
+        if region == "cn":
+            # A-share morning reports need at least SSE Composite and CSI300.
+            return {"000001", "000300"}.issubset(seen_required)
+        return True
+
     def get_main_indices(self, region: str = "cn", prefer_completed_session: bool = False) -> List[Dict[str, Any]]:
         """获取主要指数行情（自动切换数据源）。
 
         prefer_completed_session=True 用于晨间大盘复盘：跳过 TickFlow 等实时快照，
-        优先让 Tushare/Yfinance 这类日线接口返回上一完整交易日数据。
+        优先让 Tushare/Yfinance 这类日线接口返回上一完整交易日数据；若返回
+        非空但关键指数缺失或数值无效，则继续降级到 Efinance/Akshare 等源。
         """
         fetchers = self._get_fetchers_snapshot()
         if prefer_completed_session:
@@ -1637,18 +1679,22 @@ class DataFetcherManager:
             if tickflow_fetcher is not None:
                 try:
                     data = tickflow_fetcher.get_main_indices(region=region)
-                    if data:
+                    if self._has_valid_main_index_payload(data, region=region):
                         logger.info("[TickFlowFetcher] 获取指数行情成功")
                         return data
+                    if data:
+                        logger.warning("[TickFlowFetcher] 指数行情不完整或无效，尝试下一个数据源")
                 except Exception as e:
                     logger.warning(f"[TickFlowFetcher] 获取指数行情失败: {e}")
 
         for fetcher in fetchers:
             try:
                 data = fetcher.get_main_indices(region=region)
-                if data:
+                if self._has_valid_main_index_payload(data, region=region):
                     logger.info(f"[{fetcher.name}] 获取指数行情成功")
                     return data
+                if data:
+                    logger.warning(f"[{fetcher.name}] 指数行情不完整或无效，尝试下一个数据源")
             except Exception as e:
                 logger.warning(f"[{fetcher.name}] 获取指数行情失败: {e}")
                 continue

@@ -519,7 +519,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         
         logger.info("[大盘] 调用大模型生成复盘报告...")
         # Use the public generate_text() entry point — never access private analyzer attributes.
-        review = self.analyzer.generate_text(prompt, max_tokens=8192, temperature=0.7)
+        review = self.analyzer.generate_text(prompt, max_tokens=8192, temperature=0.3)
 
         if review:
             logger.info("[大盘] 复盘报告生成成功，长度: %d 字符", len(review))
@@ -660,13 +660,13 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             reasons = self._build_market_light_reasons_en(overview, score)
         else:
             label_map = {
-                "green": "可进攻",
-                "yellow": "需观察",
+                "green": "偏积极",
+                "yellow": "中性观察",
                 "red": "偏防守",
             }
             guidance_map = {
-                "green": "风险偏好尚可，关注主线延续与仓位纪律。",
-                "yellow": "信号分化，控制仓位并等待量价确认。",
+                "green": "信号偏积极，但仍以仓位纪律和止损条件优先，不追高。",
+                "yellow": "信号分化，保持中性仓位，等待量价与宽度同步确认。",
                 "red": "风险偏高，优先控制回撤，避免追高弱反弹。",
             }
             reasons = self._build_market_light_reasons_zh(overview, score)
@@ -973,6 +973,8 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 - No code blocks
 - Use emoji sparingly in headings (at most one per heading)
 - The entire fixed shell, headings, guidance, and conclusion must be in English
+- Keep the analysis objective and data-first: separate observed facts from assumptions, avoid deterministic forecasts, and do not invent precise support/resistance levels unless present in the data
+- Do not provide single-stock buy/sell instructions or return promises; the strategy section must emphasize risk control, position caps, and invalidation triggers
 
 ---
 
@@ -1037,6 +1039,9 @@ Output the report content directly, no extra commentary.
 - emoji 仅在标题处少量使用（每个标题最多1个）
 - 报告要像交易员盘后工作台：先给结论，再按数据表、主线、催化、计划展开
 - 不要重复列出已由系统注入的表格数据；正文负责解释表格背后的含义
+- 分析必须客观、克制、数据优先：明确区分“已发生事实”和“推断/假设”，不要使用确定性预测
+- 除非数据中直接给出支撑/压力位，否则不要编造精确点位；下一交易日计划必须强调风险控制、仓位上限和失效条件
+- 不要给个股买卖指令或收益承诺，结尾必须说明“建议仅供参考，不构成投资建议”
 
 ---
 
@@ -1083,7 +1088,7 @@ Output the report content directly, no extra commentary.
 （结合近三日新闻，提炼真正影响下一交易日交易的催化或扰动）
 
 ### 六、下一交易日计划
-（给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向和一个触发失效条件）
+（给出偏积极/中性/防守结论、仓位上限、关注方向、回避方向和一个触发失效条件；不得给出确定性预测或个股买卖指令）
 
 ### 七、风险提示
 （列出需要关注的风险点；最后补充“建议仅供参考，不构成投资建议”。）

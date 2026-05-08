@@ -719,7 +719,7 @@ class TestMarketAnalyzerBypassFix:
         ma.analyzer.generate_text.assert_called_once()
         _, kwargs = ma.analyzer.generate_text.call_args
         assert kwargs["max_tokens"] == 8192
-        assert kwargs["temperature"] == 0.7
+        assert kwargs["temperature"] == 0.3
 
     def test_generate_template_review_uses_english_shell_for_cn_when_report_language_is_en(self):
         from src.market_analyzer import MarketOverview, MarketIndex
@@ -882,7 +882,7 @@ Sector text.
         result = ma._inject_data_into_review(review, overview, news)
 
         assert "大盘红绿灯" in result
-        assert "green（可进攻）" in result
+        assert "green（偏积极）" in result
         assert "核心原因" in result
         assert "操作建议" in result
         assert "盘面温度" in result

@@ -32,7 +32,7 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code
-from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
+from .realtime_types import UnifiedRealtimeQuote, RealtimeSource, safe_float
 from .us_index_mapping import get_us_index_yf_symbol, is_us_stock_code
 
 # 可选导入本地股票映射补丁，若缺失则使用空字典兜底
@@ -282,25 +282,32 @@ class YfinanceFetcher(BaseFetcher):
         today_row = hist.iloc[-1]
         trade_date = today_row.name.strftime('%Y-%m-%d') if hasattr(today_row.name, 'strftime') else str(today_row.name)[:10]
         prev_row = hist.iloc[-2] if len(hist) > 1 else today_row
-        price = float(today_row['Close'])
-        prev_close = float(prev_row['Close'])
+        price = safe_float(today_row.get('Close'), 0.0)
+        prev_close = safe_float(prev_row.get('Close'), 0.0)
+        high = safe_float(today_row.get('High'), 0.0)
+        low = safe_float(today_row.get('Low'), 0.0)
+        open_price = safe_float(today_row.get('Open'), 0.0)
+        volume = safe_float(today_row.get('Volume'), 0.0)
+        if price <= 0 or prev_close <= 0:
+            logger.warning(
+                f"[Yfinance] 指数 {name} 最新/昨收无效: close={today_row.get('Close')}, prev={prev_row.get('Close')}"
+            )
+            return None
         change = price - prev_close
-        change_pct = (change / prev_close) * 100 if prev_close else 0
-        high = float(today_row['High'])
-        low = float(today_row['Low'])
+        change_pct = (change / prev_close) * 100
         # 振幅 = (最高 - 最低) / 昨收 * 100
-        amplitude = ((high - low) / prev_close * 100) if prev_close else 0
+        amplitude = ((high - low) / prev_close * 100) if high > 0 and low > 0 else 0.0
         return {
             'code': return_code,
             'name': name,
             'current': price,
             'change': change,
             'change_pct': change_pct,
-            'open': float(today_row['Open']),
+            'open': open_price,
             'high': high,
             'low': low,
             'prev_close': prev_close,
-            'volume': float(today_row['Volume']),
+            'volume': volume,
             'amount': 0.0,  # Yahoo Finance 不提供准确成交额
             'amplitude': amplitude,
             'trade_date': trade_date,
